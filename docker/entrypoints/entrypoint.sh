@@ -1,6 +1,6 @@
 
 #!/bin/sh
-source ./common.sh
+. ./common.sh
 
 log_current_user
 log_version_info

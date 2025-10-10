@@ -1,10 +1,11 @@
-FROM python:3.11-alpine3.20 AS base
+FROM python:3.12.12-slim-bookworm AS base
 
 FROM base AS deps
 
 
-RUN addgroup -g 1000 beetle && \
-    adduser -D -u 1000 -G beetle beetle
+RUN groupadd -g 1000 beetle && \
+    useradd -m -u 1000 -g beetle beetle
+# -m creates home directory
 
 ENV HOSTNAME="beets-container"
 ENV EDITOR="vi"
@@ -27,14 +28,13 @@ RUN chown -R beetle:beetle /music
 
 # dependencies
 # RUN --mount=type=cache,target=/var/cache/apk \
-RUN apk update
-RUN --mount=type=cache,target=/var/cache/apk \
-    apk add \
+RUN apt update
+RUN apt install -y --no-install-recommends \
     imagemagick \
     redis  \
     bash \
     tmux \
-    shadow \
+    # shadow \ # doesn't exist in Debian
     git \
     ffmpeg
 
@@ -76,8 +76,7 @@ RUN python -c "import tomllib; print(tomllib.load(open('/repo/backend/pyproject.
 
 FROM deps AS dev
 
-RUN --mount=type=cache,target=/var/cache/apk \
-    apk add \
+RUN apt install -y --no-install-recommends \
     npm
 
 RUN npm install -g pnpm
@@ -127,8 +126,7 @@ ENTRYPOINT ["./entrypoint_test.sh"]
 FROM deps AS build
 # Build frontend files
 
-RUN --mount=type=cache,target=/var/cache/apk \
-    apk add \
+RUN apt install -y --no-install-recommends \
     npm
 
 RUN npm install -g pnpm
