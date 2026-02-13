@@ -38,7 +38,7 @@ from beets_flask.logger import log
 
 
 def _copy_file(src, dest):
-    with open(src, "r") as src_file, open(dest, "w") as dest_file:
+    with open(src) as src_file, open(dest, "w") as dest_file:
         dest_file.write(src_file.read())
 
 
@@ -48,7 +48,7 @@ class Singleton(type):
     def __call__(cls, *args, **kwargs):
         """Singleton pattern implementation."""
         if cls not in cls._instances:
-            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+            cls._instances[cls] = super().__call__(*args, **kwargs)
         return cls._instances[cls]
 
 
@@ -66,6 +66,27 @@ class InteractiveBeetsConfig(BeetsConfig, metaclass=Singleton):
         """
         super().__init__("beets", "beets")
         self.reset()
+
+    @staticmethod
+    def get_beets_flask_config_path() -> str:
+        """Get the path to the beets-flask config file."""
+
+        ib_folder = os.getenv("BEETSFLASKDIR")
+        if ib_folder is None:
+            ib_folder = os.path.expanduser("~/.config/beets-flask")
+        os.makedirs(ib_folder, exist_ok=True)
+        ib_config_path = os.path.join(ib_folder, "config.yaml")
+        return ib_config_path
+
+    @staticmethod
+    def get_beets_config_path() -> str:
+        """Get the path to the beets config file."""
+        # TODO: maybe there is a beets function to get the path
+        beets_folder = os.getenv("BEETSDIR")
+        if beets_folder is None:
+            beets_folder = os.path.expanduser("~/.config/beets")
+        beets_config_path = os.path.join(beets_folder, "config.yaml")
+        return beets_config_path
 
     def reset(self):
         """Recreate the config object.
@@ -92,10 +113,7 @@ class InteractiveBeetsConfig(BeetsConfig, metaclass=Singleton):
 
         # Load config from default location (set via env var)
         # if it is set otherwise use the default location
-        ib_folder = os.getenv("BEETSFLASKDIR")
-        if ib_folder is None:
-            ib_folder = os.path.expanduser("~/.config/beets-flask")
-        ib_config_path = os.path.join(ib_folder, "config.yaml")
+        ib_config_path = self.get_beets_flask_config_path()
 
         # Check if the user config exists
         # if not, copy the example config to the user config location
@@ -103,7 +121,6 @@ class InteractiveBeetsConfig(BeetsConfig, metaclass=Singleton):
             # Copy the default config to the user config location
             log.debug(f"Beets-flask config not found at {ib_config_path}")
             log.debug(f"Copying default config to {ib_config_path}")
-            os.makedirs(ib_folder, exist_ok=True)
             ib_example_path = os.path.join(
                 os.path.dirname(__file__), "config_bf_example.yaml"
             )
@@ -111,11 +128,7 @@ class InteractiveBeetsConfig(BeetsConfig, metaclass=Singleton):
 
         # Same check for beets config and copy our default
         # if it does not exist
-        # TODO: maybe there is a beets function to get the path
-        beets_folder = os.getenv("BEETSDIR")
-        if beets_folder is None:
-            beets_folder = os.path.expanduser("~/.config/beets")
-        beets_config_path = os.path.join(beets_folder, "config.yaml")
+        beets_config_path = self.get_beets_config_path()
         if not os.path.exists(beets_config_path):
             log.debug(f"Beets config not found at {beets_config_path}")
             log.debug(f"Copying default config to {beets_config_path}")

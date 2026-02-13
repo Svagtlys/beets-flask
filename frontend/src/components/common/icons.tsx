@@ -9,6 +9,7 @@ import {
     ChevronsUpDownIcon,
     CircleCheckBigIcon,
     CircleHelpIcon,
+    ClockIcon,
     CopyIcon,
     Disc3Icon,
     FileIcon,
@@ -16,6 +17,7 @@ import {
     FlagIcon,
     FolderIcon,
     FolderOpen,
+    GuitarIcon,
     HashIcon,
     HistoryIcon,
     HourglassIcon,
@@ -27,21 +29,45 @@ import {
     Mic2Icon,
     PackageIcon,
     RocketIcon,
+    SearchXIcon,
     TagIcon,
     TagsIcon,
     Tally5Icon,
     TriangleAlertIcon,
     UserRoundIcon,
-} from "lucide-react";
-import { sneaker } from "@lucide/lab";
-import { CircularProgress, Tooltip, useTheme } from "@mui/material";
+} from 'lucide-react';
+import { sneaker } from '@lucide/lab';
+import { CircularProgress, Tooltip, useTheme } from '@mui/material';
 
-import { MinimalConfig } from "@/api/config";
-import { FolderStatus } from "@/pythonTypes";
+import { MinimalConfig } from '@/api/config';
+import { FolderStatus, SerializedException } from '@/pythonTypes';
 
-import { GrowingRipple } from "./loading";
+import { GrowingRipple } from './loading';
 
-import { PairChanges } from "../import/candidates/diff";
+import { PairChanges } from '../import/candidates/diff';
+
+/* ------------------------------- Base icons ------------------------------- */
+
+export function AlbumIcon(props: LucideProps) {
+    return <Disc3Icon {...props} />;
+}
+export function ArtistIcon(props: LucideProps) {
+    return <UserRoundIcon {...props} />;
+}
+export function TrackIcon(props: LucideProps) {
+    return <AudioLinesIcon {...props} />;
+}
+export function AudioFileIcon(props: LucideProps) {
+    return <FileMusicIcon {...props} />;
+}
+export function GenreIcon(props: LucideProps) {
+    return <GuitarIcon {...props} />;
+}
+export function DurationIcon(props: LucideProps) {
+    return <ClockIcon {...props} />;
+}
+
+/* -------------------------------------------------------------------------- */
 
 /** Icon to show a folder, shows a disc icon if the folder is an album.
  *
@@ -60,10 +86,10 @@ export function FolderTypeIcon({
 
     if (isAlbum) {
         return (
-            <Disc3Icon
+            <AlbumIcon
                 style={{
-                    transform: isOpen ? "rotate(90deg)" : "",
-                    transition: "transform 0.15s ease-in-out",
+                    transform: isOpen ? 'rotate(90deg)' : '',
+                    transition: 'transform 0.15s ease-in-out',
                     flexShrink: 0,
                 }}
                 {...props}
@@ -86,10 +112,10 @@ export function FileTypeIcon({
     ...props
 }: { type: string | undefined } & LucideProps) {
     switch (type) {
-        case "mp3":
-        case "flac":
-        case "wav":
-        case "ogg":
+        case 'mp3':
+        case 'flac':
+        case 'wav':
+        case 'ogg':
             return <FileMusicIcon {...props} />;
         default:
             return <FileIcon {...props} />;
@@ -98,35 +124,38 @@ export function FileTypeIcon({
 
 /** Icon to show different penalty types.
  */
-export function PenaltyTypeIcon({ type, ...props }: { type: string } & LucideProps) {
+export function PenaltyTypeIcon({
+    type,
+    ...props
+}: { type: string } & LucideProps) {
     switch (type) {
-        case "artist":
-            return <UserRoundIcon {...props} />;
-        case "album":
-            return <Disc3Icon {...props} />;
-        case "tracks":
-        case "track":
-        case "track_changes":
-            return <AudioLinesIcon {...props} />;
-        case "extra_tracks":
-        case "extra_track":
+        case 'artist':
+            return <ArtistIcon {...props} />;
+        case 'album':
+            return <AlbumIcon {...props} />;
+        case 'tracks':
+        case 'track':
+        case 'track_changes':
+            return <TrackIcon {...props} />;
+        case 'extra_tracks':
+        case 'extra_track':
             return <ExtraTrack {...props} />;
-        case "extra_items":
-        case "extra_item":
+        case 'extra_items':
+        case 'extra_item':
             return <ExtraItem {...props} />;
-        case "media":
+        case 'media':
             return <CassetteTapeIcon {...props} />;
-        case "mediums":
+        case 'mediums':
             return <Tally5Icon {...props} />;
-        case "country":
+        case 'country':
             return <FlagIcon {...props} />;
-        case "year":
+        case 'year':
             return <CalendarIcon {...props} />;
-        case "duplicate":
+        case 'duplicate':
             return <CopyIcon {...props} />;
-        case "label":
+        case 'label':
             return <Mic2Icon {...props} />;
-        case "catalognum":
+        case 'catalognum':
             return <HashIcon {...props} />;
         default:
             console.warn(`Unknown penalty kind: ${type}`);
@@ -138,14 +167,17 @@ export function PenaltyTypeIcon({ type, ...props }: { type: string } & LucidePro
  *
  * Source types are the source of a match e.g. spotify.
  */
-export function SourceTypeIcon({ type, ...props }: { type: string } & LucideProps) {
+export function SourceTypeIcon({
+    type,
+    ...props
+}: { type: string } & LucideProps) {
     switch (type.toLowerCase()) {
-        case "spotify":
+        case 'spotify':
             return <Spotify {...props} />;
-        case "mb":
-        case "musicbrainz":
+        case 'mb':
+        case 'musicbrainz':
             return <BrainIcon {...props} />;
-        case "asis":
+        case 'asis':
             return <FileMusicIcon {...props} />;
         default:
             console.warn(`Unknown source type: ${type}`);
@@ -158,7 +190,7 @@ export function SourceTypeIconWithTooltip({
     ...props
 }: { type: string } & LucideProps) {
     return (
-        <Tooltip title={type === "asis" ? "Metadata from files" : type}>
+        <Tooltip title={type === 'asis' ? 'Metadata from files' : type}>
             <SourceTypeIcon type={type} {...props} />
         </Tooltip>
     );
@@ -167,12 +199,20 @@ export function SourceTypeIconWithTooltip({
 /** Shows the status of a folder */
 export function FolderStatusIcon({
     status,
+    exception,
     ...props
-}: { status: FolderStatus; size?: number } & LucideProps) {
+}: {
+    status: FolderStatus;
+    exception?: SerializedException | null;
+    size?: number;
+} & LucideProps) {
     switch (status) {
         case FolderStatus.UNKNOWN:
             return <CircleHelpIcon {...props} />;
         case FolderStatus.FAILED:
+            if (exception && exception.type === 'NoCandidatesFoundException') {
+                return <SearchXIcon {...props} />;
+            }
             return <TriangleAlertIcon {...props} />;
         case FolderStatus.NOT_STARTED:
             return <HourglassIcon {...props} />;
@@ -183,7 +223,7 @@ export function FolderStatusIcon({
                 <CircularProgress
                     size={props.size}
                     sx={{
-                        color: props.color || "inherit",
+                        color: props.color || 'inherit',
                     }}
                 />
             );
@@ -192,7 +232,7 @@ export function FolderStatusIcon({
                 <CircularProgress
                     size={props.size}
                     sx={{
-                        color: props.color || "inherit",
+                        color: props.color || 'inherit',
                     }}
                     disableShrink
                 />
@@ -229,7 +269,12 @@ function Spotify(props: LucideProps) {
             version="1.1"
             {...props}
         >
-            <path stroke="none" d="M 0,0 H 24 V 24 H 0 Z" fill="none" id="path2" />
+            <path
+                stroke="none"
+                d="M 0,0 H 24 V 24 H 0 Z"
+                fill="none"
+                id="path2"
+            />
             <g transform="translate(-4.3029676,-7.9256576)" id="g1349">
                 <g id="g1196" transform="translate(0.03227154,1.7049163)">
                     <path
@@ -266,7 +311,10 @@ function ExtraItem(props: LucideProps) {
             {...props}
         >
             <g transform="matrix(1,0,0,1,-1729,0)">
-                <g id="id112" transform="matrix(0.615385,0,0,0.615385,666.231,4.30769)">
+                <g
+                    id="id112"
+                    transform="matrix(0.615385,0,0,0.615385,666.231,4.30769)"
+                >
                     <g transform="matrix(1,0,0,1,-8.10543,-10.4)">
                         <g transform="matrix(1.625,0,0,1.625,-1028.54,-1911.11)">
                             <g transform="matrix(1,0,0,1,1700.35,1178.15)">
@@ -350,13 +398,15 @@ export function BootlegIcon(props: LucideProps) {
 export function InboxTypeIcon({
     type,
     ...props
-}: { type?: MinimalConfig["gui"]["inbox"]["folders"][0]["autotag"] } & LucideProps) {
+}: {
+    type?: MinimalConfig['gui']['inbox']['folders'][0]['autotag'];
+} & LucideProps) {
     switch (type) {
-        case "bootleg":
+        case 'bootleg':
             return <BootlegIcon {...props} />;
-        case "preview":
+        case 'preview':
             return <TagIcon {...props} />;
-        case "auto":
+        case 'auto':
             return <RocketIcon {...props} />;
     }
     return <InboxIcon {...props} />;
@@ -370,7 +420,7 @@ export function ChangeIcon({
     type,
     ...props
 }: {
-    type?: PairChanges["changeType"];
+    type?: PairChanges['changeType'];
 } & LucideProps) {
     const theme = useTheme();
 
@@ -380,14 +430,14 @@ export function ChangeIcon({
     };
 
     switch (type) {
-        case "extra_item":
+        case 'extra_item':
             return <PenaltyTypeIcon type="extra_items" {...props} />;
-        case "extra_track":
+        case 'extra_track':
             return <PenaltyTypeIcon type="extra_tracks" {...props} />;
-        case "change_minor":
-        case "change_major":
+        case 'change_minor':
+        case 'change_major':
             return <PenaltyTypeIcon type="tracks" {...props} />;
-        case "no_change":
+        case 'no_change':
         default:
             return <CheckIcon {...props} />;
     }

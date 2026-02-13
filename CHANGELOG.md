@@ -5,30 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.0] - Upcoming
-
-### Breaking Changes
-- You need to update your beets config, and add `musicbrainz` to the list of enabled plugins. This is required since beets 2.4.0 [see here](https://github.com/beetbox/beets/releases/tag/v2.4.0)
+## [1.2.1] - 25-12-28
 
 ### Fixed
 
+- Workaround for semicolon character not appearing in web terminal [#243](https://github.com/pSpitzner/beets-flask/issues/243)
+
+## [1.2.0] - 25-12-17
+
+### ⚠️ Important ⚠️
+
+- You need to update your beets config, and add `musicbrainz` to the list of enabled plugins. This is required because we updated the beets backend [see here](https://github.com/beetbox/beets/releases/tag/v2.4.0)
+
+### Fixed
+
+- Duration component could display nothing in some edge cases.
+- Action buttons now have a slight box shadow and are a bit more visible.
 - We now support playing container types [m4a, mp4, mov, alac, aac, mp3] that require seeking. This should fix issues with some mp4/m4a files not playing.
+- If no candidates are found during an import, we now show a message instead of an empty screen. [#190](https://github.com/pSpitzner/beets-flask/issues/190)
+- Archive files can now be deleted [#217](https://github.com/pSpitzner/beets-flask/issues/217)
+- Import Bootleg Button now works as expected [#218](https://github.com/pSpitzner/beets-flask/issues/218)
+- Startup script was not executed correctly if placed in `/config/beets-flask/startup.sh` [#227](https://github.com/pSpitzner/beets-flask/pull/227)
+- Another state-related bug around Searching for Candidates [#225](https://github.com/pSpitzner/beets-flask/issues/225). We now no longer require a certaint type of state before allowing to add candidates.
+- Asis candidates have been restyled to be more consistent with other candidate types. They now also include a cover art preview if available.
+- Fixed a typo in our opiniated beets config [#235](https://github.com/pSpitzner/beets-flask/issues/235)
+- Fixed a styling issue in the artists list view which caused an overflow
+- Fixed a styling issue where an extra cancel-button (cross) was shown on webkit browsers
 
 ### Added
 
+- Added ability to define more groups to take care of ACLs, so that our non-root user can delete files on host systems, if desired. New environment variable `EXTRA_GROUPS` [#234](https://github.com/pSpitzner/beets-flask/issues/234)
 - The inbox info button now has a description of all actions [#145](https://github.com/pSpitzner/beets-flask/issues/145)
+- Subpage for version information and configs. You can access it via the version number in the navbar. [#205](https://github.com/pSpitzner/beets-flask/issues/205)
+- New config option `gui.inbox.debounce_before_autotag` to configure how many seconds to wait after the last filesystem event before starting autotagging. Same debounce applies to all inboxes. [#222](https://github.com/pSpitzner/beets-flask/issues/222)
+- The library view on mobile now has a button to collapse the overview (above the tabs). This allows for more space when browsing the library on small screens.
 
 ### Other (dev)
 
 - The default beets config now includes a `musicbrainz` section that enables fetching of external ids (like tidal).
 - Fixed typing issues in `./tests` folder and enabled mypy check for it.
 - Ruff now has the F401 (imported but unused) check enabled.
+- Ruff now had the UP checks enabled to enforce modern python syntax.
+- Unified coverart components in the frontend, we now use common styling for external and internal coverart.
+- Moved inbox metadata fetching into the library api routes.
+- Frontend formatter prettier is now enforced via a CI/CD workflow step
 
 ### Dependencies
 
 - Updated `uvicorn`  to `0.36.0`.
-- Updated `beets`  to `2.4.0`.
-- Updated a number of frontend dependencies, including `react-query`, `react-router`, `vite`, `typescript`, `eslint`, `prettier` and others.
+- Updated `beets`  from `2.3.1` over [`2.4.0`](https://github.com/beetbox/beets/releases/tag/v2.4.0) to [`2.5.0`](https://github.com/beetbox/beets/releases/tag/v2.5.0). See the two changelogs!
+- Updated a number of frontend dependencies, including `react-query`, `react-router`, `vite`, `typescript`, `eslint`, `prettier` and others. This partially required code changes due to breaking changes in these libraries. Should not affect normal usage tho.
 
 ## [1.1.3] - 25-09-18
 
@@ -233,7 +259,8 @@ Small version bump with fixes before jumping to 1.0.0.
 -   initial commit
 
 
-[Unreleased]: https://github.com/pSpitzner/beets-flask/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/pSpitzner/beets-flask/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/pSpitzner/beets-flask/compare/v1.1.3...v1.2.0
 [1.1.3]: https://github.com/pSpitzner/beets-flask/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/pSpitzner/beets-flask/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/pSpitzner/beets-flask/compare/v1.1.0...v1.1.1

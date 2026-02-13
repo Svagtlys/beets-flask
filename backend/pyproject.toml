@@ -1,7 +1,7 @@
 [project]
 name = "beets-flask"
 description = "An opinionated web-interface around the music organizer [beets](https://beets.io/)"
-version = "1.2.0"
+version = "1.2.1"
 authors = [
     { name = "F. Paul Spitzner", email = "paul.spitzner@gmail.com" },
     { name = "Sebastian B. Mohr", email = "sebastian@mohrenclan.de" },
@@ -16,7 +16,7 @@ classifiers = [
 dependencies = [
     "quart>=0.20.0",
     "confuse>=2.0.1",
-    "beets==2.4.0",
+    "beets==2.5.1",
     "sqlalchemy>=2.0.35",
     "rq>=2.0.0",
     "watchdog>=5.0.3",
@@ -86,6 +86,7 @@ allow-direct-references = true
 
 [tool.ruff]
 include = ["pyproject.toml", "beets_flask/**/*.py", "tests/**/*.py"]
+target-version = "py311"
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**/*" = ["D"]
@@ -99,6 +100,8 @@ select = [
     "D401",
     # Unused imports
     "F401",
+    # pyupgrade
+    "UP",
 ]
 ignore = [
     # Ignore req. for public facing functions docstrings
@@ -142,5 +145,6 @@ module = [
     "confuse.*",
     "mediafile.*",
     "nest_asyncio",
+    "beetsplug.*",
 ]
 ignore_missing_imports = true

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
-    Awaitable,
-    Callable,
     Literal,
     ParamSpec,
     TypeVar,
@@ -36,7 +35,6 @@ from beets_flask.importer.session import (
     UndoSession,
     delete_from_beets,
 )
-from beets_flask.importer.states import Progress
 from beets_flask.importer.types import DuplicateAction
 from beets_flask.logger import log
 from beets_flask.redis import import_queue, preview_queue
@@ -65,6 +63,15 @@ def emit_update_on_job_change(job, connection, result, *args, **kwargs):
     """
     log.debug(f"job update for socket {job=} {connection=} {result=} {args=} {kwargs=}")
 
+    def _is_serialized_exception(d: Any):
+        # I wish we could to instance checks on our SerializedException TypedDict
+        if not isinstance(result, dict):
+            return False
+        if "type" in d and "message" in d.keys():
+            # the other keys are optional
+            return True
+        return False
+
     try:
         asyncio.run(
             send_status_update(
@@ -72,6 +79,7 @@ def emit_update_on_job_change(job, connection, result, *args, **kwargs):
                     message="Job status update",
                     num_jobs=1,
                     job_metas=[job.get_meta()],
+                    exc=result if _is_serialized_exception(result) else None,
                 )
             )
         )
@@ -460,8 +468,6 @@ async def run_preview(
     return
 
 
-
-
 # redis preview queue
 @exception_as_return_value
 @emit_folder_status(before=FolderStatus.PREVIEWING, after=FolderStatus.PREVIEWED)
@@ -482,11 +488,6 @@ async def run_preview_add_candidates(
 
     with db_session_factory() as db_session:
         s_state_live = _get_live_state_by_folder(hash, path, db_session)
-
-        if s_state_live.progress != Progress.PREVIEW_COMPLETED:
-            raise InvalidUsageException(
-                f"Session state not in preview completed state for {hash=}"
-            )
 
         a_session = AddCandidatesSession(
             s_state_live,
@@ -561,7 +562,7 @@ async def run_import_auto(
         )
 
         try:
-            i_session.run_sync()
+            await i_session.run_async()
         finally:
             s_state_indb = SessionStateInDb.from_live_state(i_session.state)
             db_session.merge(instance=s_state_indb)
@@ -585,7 +586,7 @@ async def run_import_bootleg(hash: str, path: str):
         i_session = BootlegImportSession(s_state_live)
 
         try:
-            i_session.run_sync()
+            await i_session.run_async()
         finally:
             s_state_indb = SessionStateInDb.from_live_state(i_session.state)
             db_session.merge(instance=s_state_indb)

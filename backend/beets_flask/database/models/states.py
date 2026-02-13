@@ -16,8 +16,9 @@ from __future__ import annotations
 import io
 import pickle
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
+from beets.autotag import AlbumMatch
 from beets.autotag.distance import Distance
 from beets.importer import Action, ImportTask
 from beets.library.models import Item as LibraryItem
@@ -62,9 +63,9 @@ class FolderInDb(Base):
     full_path: Mapped[str] = mapped_column(index=True, primary_key=True)
 
     # checked -> yes | no or didnt check -> None
-    is_album: Mapped[Optional[bool]]
+    is_album: Mapped[bool | None]
 
-    def __init__(self, path: Path | str, hash: str, is_album: Optional[bool] = None):
+    def __init__(self, path: Path | str, hash: str, is_album: bool | None = None):
         """
         Create a FolderInDb object from a path.
 
@@ -284,7 +285,7 @@ class SessionStateInDb(Base):
         cls,
         hash: str | None,
         path: Path | str | None,
-        db_session: Optional[Session] = None,
+        db_session: Session | None = None,
     ) -> SessionStateInDb | None:
         """
         Get a session by its hash and if this fails, try its path.
@@ -545,16 +546,42 @@ class CandidateStateInDb(Base):
 
 
 # Hotfix for match unpickler to resolve beets distance moved
+# This is needed because various beets updates changed class implementations
+# and we want to rebuild the newer versions of some beets classes from old pickles.
 # TODO: We should fix this in general and not pickle beets objects
 class CustomUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
         """Override the find_class method to redirect Distance class references."""
-        # Redirect Distance class from beets.autotag.hooks to beets.distance
+        # Redirect Distance class from beets.autotag.hooks to beets.distance (2.4.0)
         if module == "beets.autotag.hooks" and name == "Distance":
             return Distance
 
         # For all other classes, use the default lookup mechanism
         return super().find_class(module, name)
+
+    def load(self) -> Any:
+        object = super().load()
+        if isinstance(object, Distance):
+            self.patch_distance(object)
+
+        if isinstance(object, AlbumMatch):
+            self.patch_distance(object.distance)
+
+        return object
+
+    def patch_distance(self, distance: Distance) -> Distance:
+        # Rewrite "source" penalty to "data_source" penalty (2.5.0)
+        if "source" in distance._penalties:
+            log.debug(
+                "Converting old distance.source to distance.data_source (changed in beets 2.5.0)"
+            )
+            distance._penalties["data_source"] = distance._penalties["source"]
+            del distance._penalties["source"]
+
+            # Potential infinite recursion, ah well
+            for track, d in distance.tracks.items():
+                self.patch_distance(d)
+        return distance
 
 
 __all__ = ["SessionStateInDb", "TaskStateInDb", "CandidateStateInDb"]

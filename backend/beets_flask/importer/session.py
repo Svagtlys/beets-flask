@@ -23,14 +23,17 @@ action_for_all : TaskIdMappingArg[DuplicateAction] = {"*": "remove"}
 ```
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
 from copy import deepcopy
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Literal, TypedDict, TypeGuard, TypeVar
+from typing import Any, Literal, TypedDict, TypeGuard, TypeVar
 
 import nest_asyncio
 from beets import autotag, importer, plugins
@@ -48,8 +51,10 @@ from beets_flask.importer.types import (
 )
 from beets_flask.logger import log
 from beets_flask.server.exceptions import (
+    ApiException,
     DuplicateException,
     IntegrityException,
+    NoCandidatesFoundException,
     NotImportedException,
     to_serialized_exception,
 )
@@ -58,12 +63,11 @@ from beets_flask.utility import capture_stdout_stderr
 from .pipeline import AsyncPipeline
 from .stages import (
     StageOrder,
+    finalize,
     group_albums,
     identify_duplicates,
     lookup_candidates,
     manipulate_files,
-    mark_tasks_completed,
-    mark_tasks_preview_completed,
     match_threshold,
     plugin_stage,
     read_tasks,
@@ -334,31 +338,28 @@ class BaseSession(importer.ImportSession, ABC):
         return False
 
     def identify_duplicates(self, task: importer.ImportTask):
-        """For all candidates, check if they have duplicates in the library."""
-        task_state = self.state.get_task_state_for_task_raise(task)
+        """For all candidates, check if they have duplicates in the library.
 
-        for idx, cs in enumerate(
-            task_state.candidate_states + [task_state.asis_candidate]
-        ):
-            # This is a mutable operation i.e. cs is modfied here!
-            duplicates = cs.identify_duplicates(self.lib)
-
-            if len(duplicates) > 0:
-                log.debug(f"Found duplicates for {cs.id=}: {duplicates}")
+        This stage should only be run for preview sessions, but we still have
+        some old code in stages.py/user_query().
+        """
+        raise NotImplementedError(
+            f"This session should not reach this stage. {self.__class__.__name__}"
+        )
 
     def lookup_candidates(self, task: importer.ImportTask):
-        """Lookup candidates for the task."""
+        """Lookup candidates for the task.
 
-        # Restrict the initial lookup to IDs specified by the user via the -m
-        # option. Currently all the IDs are passed onto the tasks directly.
-        # FIXME: Revisit, we want to avoid using the global config.
-        task.lookup_candidates(self.config["search_ids"].as_str_seq())
+        This stage should only be run for preview sessions, but we still have
+        some old code in stages.py/user_query().
+        """
+        raise NotImplementedError(
+            f"This session should not reach this stage. {self.__class__.__name__}"
+        )
 
-        # Update our state
-        task_state = self.state.get_task_state_for_task_raise(task)
-
-        # FIXME: type hint should be fine once beets updates
-        task_state.add_candidates(task.candidates)  # type: ignore
+    def finalize(self, task: importer.ImportTask):
+        """Last stage called and customizable any session."""
+        self.logger.debug(f"Finalized {self} {task}")
 
     # ---------------------------------- Run --------------------------------- #
 
@@ -388,13 +389,20 @@ class BaseSession(importer.ImportSession, ABC):
         log.debug(f"Running {len(self.pipeline.stages)} stages.")
 
         # reset exception state
-        self.state.exc = None
+        # TODO: To clear or not to clear,
+        # exception hierarchy and own table for exceptions/warnings
+        # self.state.exc = None
         plugins.send("import_begin", session=self)
         try:
             assert self.pipeline is not None
             await self.pipeline.run_async()
         except importer.ImportAbortError:
             log.debug(f"Interactive import session aborted by user")
+        except ApiException as e:
+            if e.persist_in_db:
+                log.debug(f"Persisting exception {e} in session state")
+                self.state.exc = to_serialized_exception(e)
+            raise e
         except Exception as e:
             self.state.exc = to_serialized_exception(e)
             raise e
@@ -434,6 +442,8 @@ class PreviewSession(BaseSession):
         self.group_albums = group_albums
         self.autotag = autotag
 
+    # -------------------------------- Stages -------------------------------- #
+
     @property
     def stages(self) -> StageOrder:
         stages = StageOrder()
@@ -453,9 +463,41 @@ class PreviewSession(BaseSession):
             stages.append(lookup_candidates(self))
 
         stages.append(identify_duplicates(self))
-        stages.append(mark_tasks_preview_completed(self))
+        stages.append(finalize(self))
 
         return stages
+
+    # --------------------------- Stage Definitions -------------------------- #
+
+    def identify_duplicates(self, task: importer.ImportTask):
+        """For all candidates, check if they have duplicates in the library."""
+        task_state = self.state.get_task_state_for_task_raise(task)
+
+        for idx, cs in enumerate(
+            task_state.candidate_states + [task_state.asis_candidate]
+        ):
+            # This is a mutable operation i.e. candidate state is modfied here!
+            duplicates = cs.identify_duplicates(self.lib)
+
+            if len(duplicates) > 0:
+                log.debug(f"Found duplicates for {cs.id=}: {duplicates}")
+
+    def lookup_candidates(self, task: importer.ImportTask):
+        """Lookup candidates for the task."""
+
+        search_ids = self.config["search_ids"].as_str_seq()  # might be an empty list
+        log.debug(
+            f"Looking up candidates for {task.paths}, using search ids {search_ids}"
+        )
+
+        task.lookup_candidates(search_ids)
+
+        if len(task.candidates) == 0:
+            raise NoCandidatesFoundException(persist_in_db=True)
+
+        # Update our state
+        task_state = self.state.get_task_state_for_task_raise(task)
+        task_state.add_candidates(task.candidates)
 
 
 class AddCandidatesSession(PreviewSession):
@@ -467,6 +509,7 @@ class AddCandidatesSession(PreviewSession):
     """
 
     search: TaskIdMapping[Search | Literal["skip"]]
+    initial_task_states: dict[str, ProgressState]
 
     def __init__(
         self,
@@ -477,16 +520,17 @@ class AddCandidatesSession(PreviewSession):
     ):
         super().__init__(state, config_overlay, **kwargs)
 
-        if state.progress != Progress.PREVIEW_COMPLETED:
-            raise ValueError("Cannot run AddCandidatesSession on non-preview state.")
-
         # None means skip search for this task
         self.search = parse_task_id_mapping(search, "skip")
+        self.initial_task_states = {}
 
-        # Reset task progress only for tasks that have search values
-        # other tasks are skipped
         for task in self.state.task_states:
+            self.initial_task_states[task.id] = deepcopy(task.progress)
             if task.progress >= Progress.PREVIEW_COMPLETED:
+                # Reset task progress only for tasks that have search values
+                # other tasks are skipped
+                # This should only be relevant for searches on multiple tasks
+                # (i.e. folders)
                 s = self.search[task.id]
                 if s != "skip":
                     task.set_progress(Progress.LOOKING_UP_CANDIDATES - 1)
@@ -502,6 +546,8 @@ class AddCandidatesSession(PreviewSession):
             log.debug(f"Skipping search for {task_state.id=}")
             return
 
+        # Beets treats empty strings like real strings, which is not what we want here.
+        # TODO: revisit once PR merged upstream: https://github.com/beetbox/beets/pull/6117
         if (
             search["search_artist"] is not None
             and search["search_artist"].strip() == ""
@@ -509,23 +555,84 @@ class AddCandidatesSession(PreviewSession):
             search["search_artist"] = None
         if search["search_album"] is not None and search["search_album"].strip() == "":
             search["search_album"] = None
+        search["search_ids"] = list(
+            filter(lambda x: x.strip() != "", search["search_ids"])
+        )
 
         log.debug(f"Using {search=} for {task_state.id=}, {task_state.paths=}")
 
-        _, _, prop = autotag.tag_album(
-            task.items,
-            search_ids=search["search_ids"],
-            search_album=search["search_album"],
-            search_artist=search["search_artist"],
-        )
+        try:
+            _, _, prop = autotag.tag_album(
+                task.items,
+                search_ids=search["search_ids"],
+                search_album=search["search_album"],
+                search_artist=search["search_artist"],
+            )
+        except Exception as e:
+            # TODO: With beets 2.6.0 this should be revisited
+            # since beets should than be able to handle these exceptions
+            # gracefully upstream.
+            # https://github.com/beetbox/beets/pull/5965
+            from beetsplug.musicbrainz import MusicBrainzAPIError
+            from beetsplug.spotify import APIError as SpotifyAPIError
 
-        if len(prop.candidates) == 0:
-            raise ValueError(f"Lookup found no candidates.")
+            if isinstance(e, MusicBrainzAPIError):
+                raise NoCandidatesFoundException(
+                    f"Failed to contact Musicbrainz API: {e.get_message()}",
+                    persist_in_db=False,
+                )
+            elif isinstance(e, SpotifyAPIError):
+                raise NoCandidatesFoundException(
+                    f"Failed to contact Spotify API: {e}",
+                    persist_in_db=False,
+                )
+            else:
+                raise NoCandidatesFoundException(
+                    f"Failed to contact online APIs.",
+                    persist_in_db=False,
+                )
 
         task_state.add_candidates(prop.candidates)
 
         # Update quality of best candidate, likely not needed for us, only beets cli.
         task.rec = max(prop.recommendation, task.rec or autotag.Recommendation.none)
+
+        if len(prop.candidates) == 0:
+            error_text = "Search found no candidates via "
+            if search["search_ids"]:
+                error_text += f"ids: {', '.join(search['search_ids'])}; "
+            if search["search_artist"]:
+                error_text += f"artist: {search['search_artist']}; "
+            if search["search_album"]:
+                error_text += f"album: {search['search_album']}; "
+            error_text += NoCandidatesFoundException.metadata_plugin_info()
+            raise NoCandidatesFoundException(
+                error_text,
+                persist_in_db=False,
+            )
+        # Hack: Clear exception if we found new candidates
+        elif (
+            self.state.exc is not None
+            and self.state.exc["type"] == "NoCandidatesFoundException"
+        ):
+            log.debug(
+                "Clearing previous NoCandidatesFoundException after finding candidates via search."
+            )
+            self.state.exc = None
+
+    def finalize(self, task: importer.ImportTask):
+        """Restore initial taks and session states."""
+
+        task_state = self.state.get_task_state_for_task_raise(task)
+        if task_state.id in self.initial_task_states:
+            task_state.set_progress(self.initial_task_states[task_state.id])
+        else:
+            log.warning(
+                f"Task {task_state.id} not in initial task states. "
+                + "Cannot restore previous progress."
+            )
+
+        self.logger.debug(f"Finalized {self} {task}")
 
 
 class ImportSession(BaseSession):
@@ -651,11 +758,30 @@ class ImportSession(BaseSession):
 
         # finally, move files
         stages.append(manipulate_files(self))
-
-        # If everything went well, set tasks to completed
-        stages.append(mark_tasks_completed(self))
+        stages.append(finalize(self))
 
         return stages
+
+    def finalize(self, task: importer.ImportTask):
+        """
+        Reset previous match threshold exceptions.
+
+        Needed because we might run a normal ImportSession manually after
+        the AutoImportSession. The AutoImportSession needs to keep an Exception in its
+        status to inform the frontend, which we need to clear here.
+        (No need to override `finalize` in AutoImportSession, despite it inherriting
+        from here, because it raises when below threshold).
+        """
+        if (
+            self.state.exc is not None
+            and self.state.exc["type"] == "NotImportedException"
+            and self.state.exc["message"].startswith("Match below threshold")
+        ):
+            log.debug(
+                "Clearing previous MatchThresholdException after successful import."
+            )
+            self.state.exc = None
+        super().finalize(task)
 
     # --------------------------- Stage Definitions -------------------------- #
 
@@ -855,7 +981,8 @@ class AutoImportSession(ImportSession):
     def match_threshold(self, task: importer.ImportTask):
         """Check if the match quality is good enough to import.
 
-        Returns true if the match quality is better than threshlold.
+        Returns true if candidates were found, and the match quality is better than
+        threshlold.
 
         Note: What stops the pipeline is that we set task.choice to importer.action.SKIP,
         or raise an exception.
@@ -872,6 +999,9 @@ class AutoImportSession(ImportSession):
             distance = float(task_state.best_candidate_state.distance)  # type: ignore
         except (AttributeError, TypeError):
             distance = 2.0
+
+        if len(task.candidates) == 0:
+            raise NoCandidatesFoundException()
 
         if distance > self.import_threshold:
             log.debug(
@@ -982,6 +1112,7 @@ class UndoSession(BaseSession):
 
     @property
     def stages(self):
+        # This tweaked session skips the pipeline
         return StageOrder()
 
 
